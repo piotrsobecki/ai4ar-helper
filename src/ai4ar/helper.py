@@ -46,7 +46,7 @@ def visualize_case(case_data, path=[]):
 
     
 
-def read_case(case_id):
+def read_case(data_dir, case_id):
     
     def read_image(file):
         return sitk.GetArrayFromImage(sitk.ReadImage(file))
@@ -82,14 +82,14 @@ def read_case(case_id):
     
     for label in anatomical_labels_options:
         fname = "{}_{}_t2w.nii.gz".format(str(int(case_id)), label)
-        anatomical_labels[label] = read_image(os.path.join(config['data_dir'], 'AI4AR_cont', 'Anatomical_Labels', case_id, fname))
+        anatomical_labels[label] = read_image(os.path.join(data_dir, 'AI4AR_cont', 'Anatomical_Labels', case_id, fname))
     
     for label in data_options:
         fname = "{}_{}.mha".format(str(int(case_id)), label)
-        data[label] = read_image(os.path.join(config['data_dir'], 'AI4AR_cont', 'Data', case_id, fname))
+        data[label] = read_image(os.path.join(data_dir, 'AI4AR_cont', 'Data', case_id, fname))
     
     
-    base_dir = os.path.join(config['data_dir'], 'AI4AR_cont', 'Lesion_labels', case_id)
+    base_dir = os.path.join(data_dir, 'AI4AR_cont', 'Lesion_labels', case_id)
     
     for lesion_dir in os.listdir(base_dir):
         lesion_labels[lesion_dir] = {}
