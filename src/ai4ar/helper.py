@@ -72,35 +72,73 @@ def select_slice(data):
             max_slice = i
     return max_slice
 
-def _visualize(case):
-        
-
+def _visualize(case, base_path:str=None):
     image_groups = {}
     for image_key in case:
         image_group = image_key.split(case.k_sep)[0]
         if image_group not in image_groups:
             image_groups[image_group] = []
         image_groups[image_group].append(image_key)
-        
-
-
+    
     # Visualize the images in the case - anatomical labels, data, and lesion labels (if present) separately using subplots for each group and image key as the title
-
     for i, (image_group, image_keys) in enumerate(image_groups.items()):
-        fig, axes = plt.subplots(len(image_keys),1, figsize=(10*len(image_keys), 25))
-        for image_key_i in range(len(image_keys)):
+         # Filter the image keys to only include those that start with the base path
+        image_keys_filtr_i = [i for i, image_key in enumerate(image_keys) if base_path is None or image_key.startswith(base_path)]
+        if len(image_keys_filtr_i) == 0:
+            continue
+        fig, axes = plt.subplots(len(image_keys_filtr_i),1, figsize=(10*len(image_keys_filtr_i), 25))
+        if (len(image_keys_filtr_i) == 1):
+            axes = [axes]
+        for image_key_f_i in range(len(image_keys_filtr_i)):
+            image_key_i = image_keys_filtr_i[image_key_f_i]
             image_key = image_keys[image_key_i]
             image = case.image(image_key)
-            image_slide = select_slice(image)
-            axes[image_key_i].imshow(image[image_slide], cmap='gray')
-            axes[image_key_i].set_title('{}[{}]'.format(image_key,image_slide))
-            axes[image_key_i].axis('off')
+            image_arr = image.arr()
+            image_slide = select_slice(image_arr)
+            axes[image_key_f_i].imshow(image_arr[image_slide], cmap='gray')
+            axes[image_key_f_i].set_title('{}[{}]'.format(image_key,image_slide))
+            axes[image_key_f_i].axis('off')
         plt.tight_layout()  
         plt.show()
-
-def _read_image(file):
-    return sitk.GetArrayFromImage(sitk.ReadImage(file))
     
+def _read_image(file):
+    sitk_image = sitk.ReadImage(file)
+    return sitk.GetArrayFromImage(sitk_image)
+    
+    
+class Image: 
+
+    def __init__(self, file: str = None, image = None, base_image = None):
+        if file is None and image is None:
+            raise ValueError("Either file or image must be provided")
+        self.file = file
+        self.image= None
+        if image is not None:
+            # Check if image is a numpy array
+            if isinstance(image, np.ndarray):
+                # Convert the image to a SimpleITK image if it is a numpy array
+                self.image = sitk.GetImageFromArray(image)
+                if base_image is not None:
+                    self.image.CopyInformation(base_image)
+            # Check if image is a SimpleITK image
+            elif isinstance(image, sitk.Image): 
+                self.image = image
+            else:
+                raise ValueError("Image must be a numpy array or SimpleITK image")
+            
+    def sitk(self):
+        if self.image is None:
+            self.image = sitk.ReadImage(self.file)
+        return self.image
+
+    def arr(self):
+        return sitk.GetArrayFromImage(self.sitk())
+    
+    def write(self, file):
+        sitk.WriteImage(self.sitk(), file)
+
+
+
 class Case:
     
     def __init__(self, case_id: str, data_dir: str):
@@ -149,12 +187,15 @@ class Case:
                 
         def _combine(key):
             files = self.data[key].match('*.file')
-            images = [_read_image(file) for file in files]
+            images = [Image(file) for file in files]
             if len(images)>0:
-                out_val = np.zeros(images[0].shape)
+                base_image = images[0]
+                out_val = np.zeros(base_image.arr().shape)
                 for im in images:
-                    out_val += im
+                    out_val += im.arr()
+                out_val = Image(image=out_val, base_image=base_image.sitk())
                 return out_val
+            
             return None
         
         data = self.data[key] 
@@ -164,7 +205,7 @@ class Case:
         out_val = None
         
         if 'file' in data:
-            out_val = _read_image(data['file'])
+            out_val = Image(data['file'])
             self.data[key]['image'] = out_val
         elif combine:
             if '_combined' in data:
@@ -183,8 +224,8 @@ class Case:
         for x in sorted(self.images_keys()):
             print('Image: {}'.format(x))
             
-    def visualize(self):
-        _visualize(self)
+    def visualize(self, base_path:str):
+        _visualize(self, base_path)
 
 
 class Dataset:
