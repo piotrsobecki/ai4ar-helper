@@ -135,15 +135,34 @@ class Image:
         return sitk.GetArrayFromImage(self.sitk())
     
     def write(self, file):
+        # Make the directory if it doesn't exist for the floc file
+        os.makedirs(os.path.dirname(file), exist_ok=True)
+        
+        # Write the image to the file location or raise an error if the file exists
+        if os.path.exists(file):
+            raise ValueError("File {} already exists".format(file))
+        
         sitk.WriteImage(self.sitk(), file)
+        
+    
+    def clear_image_cache(self):
+        self.image = None
 
-
+# Function that combines the masks from multiple raters, and returns a mask with the minimum number of raters that must have marked the lesion as present
+def required_agreement(n):
+    def pp(arr):
+        arr_out = arr>=n
+        #Convert to int 
+        arr_out = arr_out.astype(int)
+        return arr_out
+    return pp
 
 class Case:
     
-    def __init__(self, case_id: str, data_dir: str):
+    def __init__(self, case_id: str, data_dir: str, tmp_dir:str):
         self.case_id = case_id
         self.data_dir = data_dir
+        self.tmp_dir = tmp_dir
         self.k_sep='/'
         self.data = benedict(_read_case(case_id, data_dir), keypath_separator=self.k_sep)
         
@@ -183,7 +202,27 @@ class Case:
     def images_initialized_keys(self):
         return set([ self.k_sep.join(path.split(self.k_sep)[:-1]) for path in self.data.keypaths() if path.endswith('image') ])
     
-    def image(self, key, combine=False):
+    
+    def image(self, key, combine=False, combine_pp = required_agreement(1)):
+        '''
+        Get an image from the case. If the image is not already loaded, it will be loaded from the file.
+        If combine is True, the image will be combined from all the files in the key path.
+        combine_pp is a function that will be applied to the combined image array.
+        
+        Parameters
+        ----------
+        key : str
+            The key path to the image
+        combine : bool, optional
+            If True, the image will be combined from all the files in the key path. The default is False.
+        combine_pp : function, optional
+            A function that will be applied to the combined image array. The default is lambda x: pp_at_least(x, 1).
+        
+        Returns
+        -------
+        Image
+            The image object.
+        '''            
                 
         def _combine(key):
             files = self.data[key].match('*.file')
@@ -193,6 +232,7 @@ class Case:
                 out_val = np.zeros(base_image.arr().shape)
                 for im in images:
                     out_val += im.arr()
+                out_val = combine_pp(out_val)
                 out_val = Image(image=out_val, base_image=base_image.sitk())
                 return out_val
             
@@ -211,9 +251,19 @@ class Case:
             if '_combined' in data:
                 out_val = data['_combined']['image']
             else:
-                out_val = _combine(key)
-                if out_val is not None:
-                    self.data[key]['_combined'] = {'image':out_val}
+                floc = os.path.join(self.tmp_dir, key,  'combined.nii.gz')
+                
+                out_val = None
+                if os.path.exists(floc):
+                    out_val = Image(floc)
+                else:
+                    out_val = _combine(key)
+                    if out_val is not None:
+                        
+                        # Save the combined image using the sitk image library to the tmp dir within the same directory structure as the key path
+                        out_val.write(floc)
+
+                self.data[key]['_combined'] = {'image':out_val, 'file':floc}
             
         if out_val is None:
             raise ValueError("No image found for key {}".format(key))
@@ -229,14 +279,22 @@ class Case:
 
 
 class Dataset:
-    def __init__(self, data_dir: str):
+    def __init__(self, data_dir: str, tmp_dir: str = None):
         self.data_dir = data_dir
+        # If tmp dir is none then create a tmp dir next to the data dir with the same name and _tmp
+        if tmp_dir is None:
+            tmp_dir = os.path.join(os.path.dirname(data_dir), os.path.basename(data_dir)+'_tmp')
+            # Make the tmp dir if it does not exist
+            if not os.path.exists(tmp_dir):
+                os.makedirs(tmp_dir)          
+        
+        self.tmp_dir = tmp_dir
         self.case_ids = os.listdir(os.path.join(self.data_dir, 'AI4AR_cont', 'Data'))
         self.cases = {}
         
     def __getitem__(self, case_id: str):
         if case_id not in self.cases:
-            self.cases[case_id] = Case(case_id, self.data_dir)
+            self.cases[case_id] = Case(case_id, self.data_dir, self.tmp_dir)
         return self.cases[case_id]
     
     def __len__(self):
