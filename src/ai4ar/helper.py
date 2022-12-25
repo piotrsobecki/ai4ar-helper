@@ -219,29 +219,6 @@ class Case:
         return self.dataset.radiological_metadata[self.radiological_metadata_idx]
     
     
-    def lesion_labels(self, lesion_id, radiologist_id):
-        if 'U_' in radiologist_id:
-            radiologist_id = radiologist_id.replace('U_', '')
-        
-        if type(lesion_id) == str:
-            lesion_id = str(int(lesion_id))
-        
-        if type(lesion_id) == int:
-            lesion_id = str(lesion_id)  
-        
-        out_dict = {}
-        for modality in modalities:
-            path = 'lesion_labels/lesion{lesion_id}/{modality}/{radiologist_id}'.format(
-                lesion_id=lesion_id, 
-                modality=modality, 
-                radiologist_id=radiologist_id
-                )
-            if path in self:
-                out_dict[modality] = self[path]
-        return out_dict
-        
-    
-    
     
     def image(self, key, combine=False, combine_pp = required_agreement(1), cache=True):
         '''
@@ -345,14 +322,55 @@ class Dataset:
         self.case_ids = os.listdir(os.path.join(self.data_dir, 'AI4AR_cont', 'Data'))
         self.cases = {}
         self.clinical_metadata = self._load_clinical_metadata()
+        # This is the original radiological metadata
         self.radiological_metadata = self._load_radiological_metadata()
+        # This is the extended radiological metadata with the lesion labels cols (images)
+        self.radiological_metadata = self._load_radiological_metadata_ext()
+        
+        
+        
     
     
     def _load_clinical_metadata(self):
         return pd.read_csv(os.path.join(self.data_dir, 'AI4A4_PCa_clinical.csv'))
     
     def _load_radiological_metadata(self):
-        return pd.read_csv(os.path.join(self.data_dir, 'AI4AR_PCa_radiological.csv'))
+        return  pd.read_csv(os.path.join(self.data_dir, 'AI4AR_PCa_radiological.csv'))
+    
+    def _load_radiological_metadata_ext(self):
+        r_metadata =  self.radiological_metadata
+        
+        # Extension of the radiological metadata
+        r_metadata_ext_floc =  os.path.join(self.tmp_dir, 'AI4AR_PCa_radiological-ext.csv')
+        
+        idx_cols = ['patient_id', 'lesion_id', 'radiologist_id']
+        
+        if os.path.exists(r_metadata_ext_floc):
+            r_metadata_ext = pd.read_csv(r_metadata_ext_floc)
+            r_metadata = r_metadata.merge(r_metadata_ext, on=idx_cols, how='left')
+        
+        else :
+            modality_label_cols = []
+            # Init paths to lesion labels
+            for modality in modalities:
+                modality_col = 'label_'+modality
+                modality_label_cols.append(modality_col)
+                r_metadata[modality_col] = 'lesion_labels/lesion'+r_metadata['lesion_id'].astype(str)+'/'+modality+'/'+r_metadata['radiologist_id'].str.split('_').str[1]
+
+            # Check if the image exists
+            for idx, row in r_metadata.iterrows():
+                case = self[str(row['patient_id']).zfill(3)]
+                for col in modality_label_cols:
+                    if row[col]  not in case: 
+                        r_metadata.loc[idx, col] = None
+            
+            # Save only idx and modality label cols to the extension file
+            idx_cols.extend(modality_label_cols)
+            
+            r_metadata[idx_cols].to_csv(r_metadata_ext_floc, index=False, header=True)
+        
+        return r_metadata
+    
     
     def __getitem__(self, case_id: str):
         if case_id not in self.cases:
