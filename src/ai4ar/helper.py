@@ -25,42 +25,34 @@ def select_slice(data):
             max_slice = i
     return max_slice
 
-def _visualize(case, base_path:str=None):
-    image_groups = {}
-    for image_key in case:
-        image_group = image_key.split(case.k_sep)[0]
-        if image_group not in image_groups:
-            image_groups[image_group] = []
-        image_groups[image_group].append(image_key)
+def _visualize(case, pattern:str=None):
+    images = case.images_match(pattern)
+    if len(images) == 0:
+        print('No images found')
+        return
     
-    # Visualize the images in the case - anatomical labels, data, and lesion labels (if present) separately using subplots for each group and image key as the title
-    for i, (image_group, image_keys) in enumerate(image_groups.items()):
-         # Filter the image keys to only include those that start with the base path
-        image_keys_filtr_i = [i for i, image_key in enumerate(image_keys) if base_path is None or image_key.startswith(base_path)]
-        if len(image_keys_filtr_i) == 0:
-            continue
-        fig, axes = plt.subplots(len(image_keys_filtr_i),1, figsize=(10*len(image_keys_filtr_i), 25))
-        if (len(image_keys_filtr_i) == 1):
-            axes = [axes]
-        for image_key_f_i in range(len(image_keys_filtr_i)):
-            image_key_i = image_keys_filtr_i[image_key_f_i]
-            image_key = image_keys[image_key_i]
-            image = case.image(image_key)
-            image_arr = image.arr()
-            image_slide = select_slice(image_arr)
-            axes[image_key_f_i].imshow(image_arr[image_slide], cmap='gray')
-            axes[image_key_f_i].set_title('{}[{}]'.format(image_key,image_slide))
-            axes[image_key_f_i].axis('off')
-        plt.tight_layout()  
-        plt.show()
-    
+    fig, axes = plt.subplots(len(images),1, figsize=(10*len(images), 25))
+    if (len(images) == 1):
+        axes = [axes]
+        
+    for image_i in range(len(images)):
+        image = images[image_i]
+        image_arr = image.arr()
+        image_slide = select_slice(image_arr)
+        axes[image_i].imshow(image_arr[image_slide], cmap='gray')
+        axes[image_i].set_title('{}[{}]'.format(image.path,image_slide))
+        axes[image_i].axis('off')
+    plt.tight_layout()  
+    plt.show()
+
     
 class Image: 
 
-    def __init__(self, file: str = None, image = None, base_image = None):
+    def __init__(self, path, file: str = None, image = None, base_image = None):
         if file is None and image is None:
             raise ValueError("Either file or image must be provided")
         self.file = file
+        self.path = path
         self.image= None
         if image is not None:
             # Check if image is a numpy array
@@ -76,7 +68,7 @@ class Image:
                 raise ValueError("Image must be a numpy array or SimpleITK image")
 
     def __str__(self):
-        return "Image(file={}, image={})".format(self.file, self.image)
+        return "Image(path={}, file={}, image={})".format(self.path, self.file, self.image)
     
     def __repr__(self):
         return self.__str__()
@@ -124,13 +116,13 @@ def _read_case(case_id, data_dir):
         fname = "{}_{}_t2w.nii.gz".format(str(int(case_id)), label)
         floc =  os.path.join(data_dir, 'AI4AR_cont', 'Anatomical_Labels', case_id, fname)
         if os.path.exists(floc):
-            anatomical_labels[label] = Image(file=floc)
+            anatomical_labels[label] = Image(path='anatomical_labels/'+label,file=floc)
     
     for label in modalities:
         fname = "{}_{}.mha".format(str(int(case_id)), label)
         floc = os.path.join(data_dir, 'AI4AR_cont', 'Data', case_id, fname)
         if os.path.exists(floc):
-            data[label] = Image(file=floc)
+            data[label] = Image(path='data/'+label, file=floc)
     
     base_dir = os.path.join(data_dir, 'AI4AR_cont', 'Lesion_labels', case_id)
     
@@ -148,7 +140,8 @@ def _read_case(case_id, data_dir):
                 for lesion_annotation in os.listdir(lesion_data_modality):
                     lesion_annotation_id = extract_id(lesion_annotation)
                     floc = os.path.join(lesion_data_modality, lesion_annotation)
-                    lesion_labels[lesion_dir][data_type][lesion_annotation_id]  = Image(file=floc)
+                    path = 'lesion_labels/'+lesion_dir+'/'+data_type+'/'+lesion_annotation_id
+                    lesion_labels[lesion_dir][data_type][lesion_annotation_id]  = Image(path=path, file=floc)
     return {
         'anatomical_labels':anatomical_labels, 
         'data':data, 
@@ -207,10 +200,10 @@ class Case:
         return self.images_keys().__iter__()   
     
     def images_keys(self):
-        return set([ self.k_sep.join(path.split(self.k_sep)[:-1]) for path in self.data.keypaths() ])
+        return [p for p in self.data.keypaths() if type(self[p]) == Image]
     
     def images_match(self, pattern):
-        return self.data.match(pattern)
+        return [ img for img in self.data.match(pattern) if type(img) == Image ] 
     
     def clinical_metadata(self):
         return self.dataset.clinical_metadata[self.clinical_metadata_idx]
@@ -220,7 +213,7 @@ class Case:
     
     
     
-    def image(self, key, combine=False, combine_pp = required_agreement(1), cache=True):
+    def image(self, key:str, combine=False, combine_pp = required_agreement(1), cache=True) -> Image:
         '''
         Get an image from the case. If the image is not already loaded, it will be loaded from the file.
         If combine is True, the image will be combined from all the files in the key path.
@@ -241,18 +234,15 @@ class Case:
             The image object.
         '''            
                 
-        def _combine(key):
-            pattern = self.k_sep.join([key, '*'])
-            print(pattern)
+        def _combine(pattern, path):
             images = self.images_match(pattern)
             if len(images)>0:
-                print(images)
                 base_image = images[0]
                 out_val = np.zeros(base_image.arr().shape)
                 for im in images:
                     out_val += im.arr()
                 out_val = combine_pp(out_val)
-                out_val = Image(image=out_val, base_image=base_image.sitk())
+                out_val = Image(path= path, image=out_val, base_image=base_image.sitk())
                 return out_val
             
             return None
@@ -284,10 +274,10 @@ class Case:
                 out_val = None
                 if cache and os.path.exists(cache_floc):
                     log.debug('from cache')
-                    out_val = Image(cache_floc)
+                    out_val = Image(path, cache_floc)
                 else:
                     log.debug('try combine')
-                    out_val = _combine(key)
+                    out_val = _combine(self.k_sep.join([key, '*']), path)
                     if out_val is not None and cache:
                         # Save the combined image using the sitk image library to the tmp dir within the same directory structure as the key path
                         out_val.write(cache_floc)
@@ -299,10 +289,6 @@ class Case:
         #    raise ValueError("No image found for key {}".format(key))
         
         return out_val
-
-    def summarize(self):
-        for x in sorted(self.images_keys()):
-            log.debug('Image: {}'.format(x))
             
     def visualize(self, base_path:str):
         _visualize(self, base_path)
