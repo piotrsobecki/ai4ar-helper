@@ -5,8 +5,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt 
 
-import logging as log
+import logging as logging
 
+log = logging.getLogger(__name__)
 
 
 modalities = ['adc', 'cor', 'hbv', 'sag', 't2w', 'dce1', 'dce2', 'dce3', 'dce4', 'dce5', 'dce6']
@@ -73,6 +74,14 @@ class Image:
                 self.image = image
             else:
                 raise ValueError("Image must be a numpy array or SimpleITK image")
+
+    def __str__(self):
+        return "Image(file={}, image={})".format(self.file, self.image)
+    
+    def __repr__(self):
+        return self.__str__()
+    
+    
             
     def sitk(self):
         if self.image is None:
@@ -138,6 +147,7 @@ def _read_case(case_id, data_dir):
                 
                 for lesion_annotation in os.listdir(lesion_data_modality):
                     lesion_annotation_id = extract_id(lesion_annotation)
+                    floc = os.path.join(lesion_data_modality, lesion_annotation)
                     lesion_labels[lesion_dir][data_type][lesion_annotation_id]  = Image(file=floc)
     return {
         'anatomical_labels':anatomical_labels, 
@@ -255,9 +265,11 @@ class Case:
         '''            
                 
         def _combine(key):
-            files = self.data[key].match('*.file')
-            images = [Image(file) for file in files]
+            pattern = self.k_sep.join([key, '*'])
+            print(pattern)
+            images = self.images_match(pattern)
             if len(images)>0:
+                print(images)
                 base_image = images[0]
                 out_val = np.zeros(base_image.arr().shape)
                 for im in images:
@@ -270,20 +282,21 @@ class Case:
         
         out_val = None
         
-        log.debug('there is no data and do not combine')
         if key not in self.data and not combine:
+            log.debug('there is no data and do not combine')
             return None
         
-        log.debug('there is data')
         if key in self.data:  
+            log.debug('there is data')
             out_val = self.data[key]
             if type(out_val) is Image:
+                log.debug('the data is an image')
                 return out_val
             else:
                 out_val = None
         
-        log.debug('Try combine')
         if combine:
+            log.debug('Try combine')
             path = self.k_sep.join(['combined',key])
             log.debug('path: {}'.format(path))
             if path in self.data:
