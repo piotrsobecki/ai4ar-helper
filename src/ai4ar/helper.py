@@ -11,7 +11,7 @@ log = logging.getLogger(__name__)
 
 
 modalities = ['adc', 'cor', 'hbv', 'sag', 't2w', 'dce1', 'dce2', 'dce3', 'dce4', 'dce5', 'dce6']
-anatomical_labels =  ['afs', 'cz', 'pg', 'pz', 'sv_l', 'sv_r', 'tz']
+anatomicals =  ['afs', 'cz', 'pg', 'pz', 'sv_l', 'sv_r', 'tz']
 
     
 # Select the slice with the largest mask
@@ -112,7 +112,7 @@ def _read_case(case_id, data_dir):
     data = {}
     lesion_labels = {}
     
-    for label in anatomical_labels:
+    for label in anatomicals:
         fname = "{}_{}_t2w.nii.gz".format(str(int(case_id)), label)
         floc =  os.path.join(data_dir, 'AI4AR_cont', 'Anatomical_Labels', case_id, fname)
         if os.path.exists(floc):
