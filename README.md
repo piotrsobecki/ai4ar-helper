@@ -22,7 +22,7 @@ python -m pip install -e git+https://github.com/piotrsobecki/ai4ar-helper.git#eg
 
 The package provides interfaces to enable more readable navigation and processing of AI4AR dataset.
 
-Examples below, see the [main file (helper.py)](src/helper.py) for implementation.
+Examples below, see the [main file (helper.py)](src/ai4ar/helper.py) for implementation.
 
 
 
